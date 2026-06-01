@@ -1,0 +1,219 @@
+! ======================================================================
+! BLOCK 1: INITIAL DEVICE SECURITY & SSH CONFIGURATION
+! ======================================================================
+! Explanation:
+! This block secures the device foundation. It sets the hostname, 
+! configures passwords for the enable mode and console line, and 
+! encrypts passwords in the config file.
+! It also sets up SSH (Secure Shell) for secure remote management:
+! - Creates a local user "cisco".
+! - Generates RSA keys required for encryption (1024 bits).
+! - Enforces SSH version 2.
+! - Configures VTY lines (remote terminals) to only accept SSH (no Telnet).
+
+en
+conf t
+hostname MARKETING_LAN
+enable password cisco
+line console 0 
+password cisco
+login 
+exit
+banner motd #NO UNAUTHORISED ACCESS!!!!#
+no ip domain lookup
+service password-encryption
+
+username cisco password cisco 
+ip domain-name cisco.com
+crypto key generate rsa 
+1024
+ip ssh version 2
+line vty 0 15
+login local
+transport input ssh
+exit
+
+
+
+do wr
+
+
+
+! ======================================================================
+! BLOCK 2: VLAN CONFIGURATION & PORT ASSIGNMENT (DATA/VOICE)
+! ======================================================================
+! Explanation:
+! This block creates the initial VLANs for Data (10) and Voice (120).
+! It configures the physical switch ports:
+! - Ports fa0/5-6 are set as Trunks (uplinks to carry multiple VLANs).
+! - Ports fa0/1-4 and fa0/7-24 are set as Access ports for end users.
+! - These access ports are configured with a Data VLAN (10) and a 
+!   Voice VLAN (120) to support IP phones plugged into the PC port.
+
+en
+conf t
+vlan 10
+name DATA
+vlan 120
+name VOICE
+exit
+int range fa0/5-6
+switchport mode trunk
+exit
+int range fa0/1-4 
+switchport mode access 
+switchport access vlan 10 
+switchport voice vlan 120 
+exit
+int range fa0/7-24 
+switchport mode access 
+switchport access vlan 10 
+switchport voice vlan 120 
+exit
+do wr
+
+
+
+
+
+! ======================================================================
+! BLOCK 3: DEPARTMENTAL VLAN DATABASE CREATION
+! ======================================================================
+! Explanation:
+! This block defines the full database of VLANs used by the organization 
+! (Marketing, Call Center, HR, Developers, Managers, Media, Accounting, etc.).
+! It names them for easier identification.
+
+vlan 10
+name MR
+vlan 20
+name CC
+vlan 30 
+name HR
+vlan 40 
+name DEVE
+vlan 50 
+name MANA
+vlan 60 
+name MEDIA
+vlan 70 
+name ACC
+vlan 80 
+name Works
+vlan 120
+name voice
+Exit
+
+
+
+
+! ======================================================================
+! BLOCK 4: SVI CONFIGURATION (INITIAL VLAN 10)
+! ======================================================================
+! Explanation:
+! This configures the Layer 3 Interface (SVI) for VLAN 10. 
+! It assigns an IP address (default gateway) and an IP helper address 
+! to relay DHCP requests to a central DHCP server (192.168.21.5).
+
+interface vlan 10
+ip add 192.168.20.1 255.255.255.192
+ip helper-address 192.168.21.5
+exit
+do wr
+
+
+! ======================================================================
+! BLOCK 5: MANAGEMENT ACCESS CONTROL LIST (ACL)
+! ======================================================================
+! Explanation:
+! This restricts who can remotely connect to the device (SSH/Telnet).
+! - ACL 10 permits only IP addresses in the range 192.168.20.64 to .127.
+! - It applies this restriction (access-class) to the VTY lines.
+
+access-list 10 permit 192.168.20.64 0.0.0.63
+access-list 10 deny any
+line vty 0 15
+access-class 10 in
+exit
+do wr
+
+
+! ======================================================================
+! BLOCK 6: INTER-VLAN ROUTING & DHCP RELAY (ALL DEPARTMENTS)
+! ======================================================================
+! Explanation:
+! This block configures the Layer 3 interfaces for all departmental VLANs.
+! Note: It re-configures VLAN 10 with a different subnet mask (/27) than 
+! Block 4. 
+! Each VLAN is given:
+! - An IP address (Default Gateway for that subnet).
+! - An IP helper-address to allow devices to get IPs from the DHCP server.
+
+int vlan 10
+ip add 192.168.20.1 255.255.255.224
+ip helper-address 192.168.21.5
+ex
+int vlan 20
+ip add 192.168.20.33 255.255.255.224
+ip helper-address 192.168.21.5
+ex
+int vlan 30
+ip add 192.168.20.65 255.255.255.224
+ip helper-address 192.168.21.5
+ex
+int vlan 40
+ip add 192.168.20.97 255.255.255.224
+ip helper-address 192.168.21.5
+ex
+int vlan 50
+ip add 192.168.20.129 255.255.255.224
+ip helper-address 192.168.21.5
+ex
+int vlan 60
+ip add 192.168.20.161 255.255.255.224
+ip helper-address 192.168.21.5
+ex
+int vlan 70
+ip add 192.168.20.193 255.255.255.224
+ip helper-address 192.168.21.5
+ex
+int vlan 80
+ip add 192.168.20.225 255.255.255.240
+ip helper-address 192.168.21.5
+ex
+
+
+
+
+
+! ======================================================================
+! BLOCK 7: SITE-TO-SITE VPN CONFIGURATION (IPSEC)
+! ======================================================================
+! Explanation:
+! This block sets up a secure VPN tunnel to a remote HQ router.
+! - ACL 110: Defines "interesting traffic" (what should be encrypted).
+! - ISAKMP Policy 10: Defines Phase 1 security (AES encryption, Pre-shared key).
+! - Crypto Key: Sets the shared password ("vpnpa55") for the peer.
+! - Transform-set: Defines Phase 2 encryption (AES).
+! - Crypto Map: Bundles the ACL, Peer IP, and Transform-set together.
+! - Interface S0/3/0: Applies the VPN map to the outgoing Serial interface.
+
+access-list 110 permit ip 192.168.21.0 0.0.0.15 192.168.20.0 0.0.0.255
+crypto isakmp policy 10
+encryption aes 256
+authentication pre-share
+group 5
+exit
+crypto isakmp key vpnpa55 address 190.200.100.1
+crypto ipsec transform-set VPN-SET esp-aes esp-sha-hmac
+crypto map VPN-MAP 10 ipsec-isakmp
+description VPN connection to HQrouter.
+set peer 190.200.100.1
+set transform-set VPN-SET
+match address 110
+exit
+
+interface S0/3/0
+crypto map VPN-MAP
+EXIT
+do wr
